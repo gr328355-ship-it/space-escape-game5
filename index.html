@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Space Escape — Retro Pixel Planet</title>
+<style>
+  :root {
+    --retro-green: #00ff66;
+    --bg-black: #000;
+    --panel-bg: rgba(0, 16, 0, 0.9);
+  }
+  html,body { height:100%; margin:0; background:var(--bg-black); color:var(--retro-green); font-family: "Courier New", monospace; }
+  canvas { display:block; width:100%; height:100vh; }
+
+  /* Persistent overlay UI */
+  #ui {
+    position: absolute; left:16px; top:16px; z-index:50;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .btn {
+    background:transparent; color:var(--retro-green);
+    border:1px solid var(--retro-green); padding:6px 10px; border-radius:6px;
+    cursor:pointer; font-family:inherit;
+  }
+  .btn:hover { background:var(--retro-green); color:black; }
+
+  #infoPanel {
+    position:absolute; right:16px; top:16px; width:320px; z-index:50;
+    background:var(--panel-bg); border:2px solid var(--retro-green); padding:12px; border-radius:8px;
+    display:none; color:var(--retro-green);
+    max-height:70vh; overflow:auto;
+  }
+  #infoPanel h3 { margin:4px 0 8px 0; color:var(--retro-green); }
+  #infoPanel p { margin:4px 0; color:var(--retro-green); font-size:14px; }
+
+  /* HUD bottom */
+  #hud {
+    position:absolute; left:50%; transform:translateX(-50%); bottom:12px; z-index:50;
+    display:flex; gap:18px; align-items:center; background:var(--panel-bg);
+    padding:8px 14px; border-radius:8px; border:2px solid var(--retro-green);
+  }
+  .bar { width:160px; height:14px; background:#002200; border:1px solid var(--retro-green); position:relative; }
+  .fill { height:100%; background:var(--retro-green); width:100%; }
+
+  /* small center status text */
+  #status {
+    position:absolute; left:50%; top:8px; transform:translateX(-50%); color:var(--retro-green); z-index:50;
+    text-shadow:0 0 6px rgba(0,255,102,0.2); font-size:15px;
+  }
+
+  /* small overlay buttons on arrival */
+  #arrivalButtons { position: absolute; left: 50%; transform: translateX(-50%); bottom:80px; z-index:50; display:none; gap:8px; }
+
+  /* small help text */
+  #help { position: absolute; left:16px; bottom:16px; color:var(--retro-green); font-size:12px; z-index:50; }
+</style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="status">Choose a planet to escape to</div>
+
+  <div id="ui">
+    <button class="btn" onclick="startSelectionMode()">☄️ Select Planet</button>
+    <button class="btn" onclick="toggleInfoPanel()">ℹ️ Details</button>
+  </div>
+
+  <div id="infoPanel">
+    <h3 id="infoTitle">Game Info</h3>
+    <div id="infoContent">
+      <p>Welcome pilot. Use <strong>Select Planet</strong> to choose a target.</p>
+      <p><strong>Data available:</strong> Planetary properties, Orbital properties, Stellar properties, Radiation.</p>
+    </div>
+    <div style="margin-top:10px; display:flex; gap:8px;">
+      <button class="btn" onclick="showPlanetProps()">Planetary</button>
+      <button class="btn" onclick="showOrbitalProps()">Orbital</button>
+      <button class="btn" onclick="showStellarProps()">Stellar</button>
+      <button class="btn" onclick="showRadiationProps()">Radiation</button>
+    </div>
+  </div>
+
+  <div id="arrivalButtons">
+    <button class="btn" onclick="showPlanetProps()">Planetary Props</button>
+    <button class="btn" onclick="showStellarProps()">Scan Star</button>
+    <button class="btn" onclick="showRadiationProps()">Helmet Detail</button>
+  </div>
+
+  <div id="hud">
+    <div>Health <span id="healthValue">100%</span></div>
+    <div class="bar"><div id="healthBar" class="fill"></div></div>
+    <div>Hunger <span id="hungerValue">80%</span></div>
+    <div class="bar"><div id="hungerBar" class="fill" style="width:80%"></div></div>
+  </div>
+
+  <div id="help">Tip: open Details to view saved stats. After selecting a planet, travel will animate and then show the landing scene.</div>
+
+<script>
+/* ---------- Data ---------- */
+const planets = {
+  "W7-21": {
+    name: "W7-21",
+    planetaryProps: `Radius: 10,551,690.55 m<br/>Mass: 2.568 × 10^25 kg (4.3 M⊕)<br/>Gravity: 15.38 m/s²`,
+    orbitalProps: `Orbit Period: 17.8 days<br/>Orbit Radius: 1.26 × 10^10 m (0.0842 AU)`,
+    stellarProps: `Star Class: M3<br/>Mass: 5.0 × 10^29 kg<br/>Radius: 1.8 × 10^8 m<br/>Luminosity: 1.76 × 10^25 W<br/>Temp: 3500 K`,
+    radiation: `Stellar flux at surface: 8500 W/m²<br/>Surface Temp: ~??? K`
+  },
+  // placeholders if you want to expand
+  "X9-Zenith": {
+    name: "X9-Zenith",
+    planetaryProps: `Radius: 7,500,000 m<br/>Mass: 1.8 × 10^25 kg<br/>Gravity: 9.8 m/s²`,
+    orbitalProps: `Orbit Period: 120 days<br/>Orbit Radius: 0.3 AU`,
+    stellarProps: `Star Class: K2<br/>Mass: 1.0 × 10^30 kg<br/>Temp: 4700 K`,
+    radiation: `Radiation: 4300 W/m²`
+  },
+  "Orion-5": {
+    name: "Orion-5",
+    planetaryProps: `Radius: 12,000,000 m<br/>Mass: 3.0 × 10^25 kg<br/>Gravity: 18.2 m/s²`,
+    orbitalProps: `Orbit Period: 45 days<br/>Orbit Radius: 0.14 AU`,
+    stellarProps: `Star Class: M1<br/>Mass: 6.0 × 10^29 kg<br/>Temp: 3600 K`,
+    radiation: `Radiation: 6200 W/m²`
+  }
+};
+
+let selectedPlanet = null;
+
+/* ---------- Canvas setup ---------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let DPR = window.devicePixelRatio || 1;
+
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(window.innerWidth * DPR);
+  canvas.height = Math.floor(window.innerHeight * DPR);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // handle crisp drawing
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ---------- Visual state ---------- */
+let mode = "idle"; // idle, selecting, traveling, arriving
+let t = 0;
+let stars = [];
+let starCount = 220;
+function resetStars() {
+  stars = [];
+  for (let i=0;i<starCount;i++){
+    stars.push({
+      x: Math.random() * canvas.width / DPR,
+      y: Math.random() * canvas.height / DPR,
+      depth: Math.random() * 1 + 0.1,
+      size: Math.random() * 2 + 0.5
+    });
+  }
+}
+resetStars();
+
+/* ---------- Draw helpers ---------- */
+function clear() {
+  ctx.fillStyle = '#001000';
+  ctx.fillRect(0,0,canvas.width/DPR, canvas.height/DPR);
+}
+
+/* draw a "pixel-style" starfield with parallax motion to simulate speed */
+function drawStarfield(speedFactor=1) {
+  clear();
+  ctx.fillStyle = '#001100';
+  ctx.fillRect(0,0,canvas.width/DPR, canvas.height/DPR);
+
+  for (let s of stars){
+    s.y += (3 + (1 - s.depth)*8) * speedFactor;
+    s.x += Math.sin(t*0.002 + s.depth*10) * 0.2;
+    if (s.y > canvas.height/DPR + 10) {
+      s.y = -10;
+      s.x = Math.random() * canvas.width/DPR;
+      s.depth = Math.random()*1 + 0.1;
+      s.size = Math.random() * 2 + 0.5;
+    }
+    // pixel star (small rectangle)
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.6 + (1-s.depth)*0.4) + ')';
+    ctx.fillRect(Math.floor(s.x), Math.floor(s.y), Math.max(1, Math.round(s.size)), Math.max(1, Math.round(s.size)));
+  }
+}
+
+/* draw a simple pixel ship in center */
+function drawShip() {
+  const cx = canvas.width/DPR/2;
+  const cy = canvas.height/DPR/2;
+  // engine glow
+  ctx.fillStyle = 'rgba(0,255,102,0.05)';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy+30, 80, 30, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // ship body (pixel triangles)
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.sin(t*0.015)*0.03);
+  ctx.fillStyle = '#00ff66';
+  // nose
+  ctx.beginPath();
+  ctx.moveTo(0,-28);
+  ctx.lineTo(-16,18);
+  ctx.lineTo(16,18);
+  ctx.closePath();
+  ctx.fill();
+  // cockpit
+  ctx.fillStyle = '#001100';
+  ctx.fillRect(-8, -8, 16, 12);
+  // wings
+  ctx.fillStyle = '#00ff66';
+  ctx.fillRect(-28,6,20,8);
+  ctx.fillRect(8,6,20,8);
+  ctx.restore();
+}
+
+/* arriving scene - draw pixel horizon with sun and plants */
+function drawArrivalScene(phase) {
+  // phase 0..1 blending for sky colors
+  const w = canvas.width/DPR, h = canvas.height/DPR;
+  // sky gradient (pixel-ish: several horizontal bands)
+  for (let i=0;i<Math.ceil(h); i++){
+    // map i to gradient between deep purple and dark blue
+    const p = i / h;
+    // invert so horizon is lighter
+    const mix = Math.min(1, Math.max(0, 1 - (p*1.2)));
+    const r = Math.round(20 * mix + 10*(1-mix));
+    const g = Math.round(4 * mix + 6*(1-mix));
+    const b = Math.round(30 * mix + 60*(1-mix));
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, i, w, 1);
+  }
+
+  // distant star-objects (pixel planets)
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  // big planet right
+  drawPixelCircle(w*0.82, h*0.25, 60, ['#174',' #1a5','#1c7']);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // sun near horizon (glowing pixel circle)
+  const sunX = w*0.5;
+  const sunY = h*0.62;
+  const sunR = 48;
+  // halo
+  for (let r=120; r>0; r-=12) {
+    ctx.fillStyle = `rgba(255,150,0,${0.02})`;
+    ctx.beginPath(); ctx.arc(sunX, sunY, r,0,Math.PI*2); ctx.fill();
+  }
+  // core
+  drawPixelCircle(sunX, sunY, sunR, ['#ffb24d','#ff9900','#ff6b00']);
+
+  // ground layers (pixel tiled surface with craters)
+  const groundTop = h*0.72;
+  // far ground
+  ctx.fillStyle = '#1b0714';
+  ctx.fillRect(0, groundTop, w, h-groundTop);
+  // draw crater tiles as darker rounded rects pixel-ish
+  for (let i=0;i<w;i+=60){
+    ctx.fillStyle = (i%120===0) ? '#24101e' : '#1b0714';
+    const craterW = 42 + (i%3)*12;
+    const craterH = 12 + (i%4)*6;
+    ctx.fillRect(i-6, groundTop + 6, craterW, craterH);
+  }
+
+  // foreground pixel plants / silhouettes (varying shapes)
+  for (let i=0;i<18;i++){
+    const x = 20 + i * (w/18) + (Math.sin(i*2+t*0.01)*8);
+    drawPlant(x, groundTop, 12 + (i%4)*6);
+  }
+
+  // HUD note if any
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(w-220, 10, 210, 110);
+}
+
+/* small helper: draw pixelated circle by filling small rects in a circle shape */
+function drawPixelCircle(cx, cy, r, palette) {
+  for (let y=-r; y<=r; y++){
+    for (let x=-r; x<=r; x++){
+      if (x*x + y*y <= r*r){
+        // color variation by distance
+        const d = Math.sqrt(x*x+y*y) / r;
+        const col = palette[Math.floor(d * (palette.length-1))];
+        ctx.fillStyle = col;
+        // draw a 2x2 pixel block to create "pixel art" look
+        ctx.fillRect(Math.round(cx + x), Math.round(cy + y), 2, 2);
+      }
+    }
+  }
+}
+
+/* draw simple pixel-silhouette plant */
+function drawPlant(x, groundY, height) {
+  ctx.fillStyle = '#0f6';
+  // stem
+  for (let s=0;s<height;s+=4) {
+    ctx.fillRect(Math.round(x), Math.round(groundY - s - 8), 2, 4);
+  }
+  // top cluster
+  for (let p=0;p<3;p++){
+    ctx.fillRect(Math.round(x - 6 + p*6), Math.round(groundY - height - 18), 4, 6);
+  }
+}
+
+/* ---------- Interactions & flow ---------- */
+const statusEl = document.getElementById('status');
+const infoPanel = document.getElementById('infoPanel');
+const arrivalButtons = document.getElementById('arrivalButtons');
+
+function toggleInfoPanel(){
+  infoPanel.style.display = (infoPanel.style.display === 'none' || infoPanel.style.display === '') ? 'block' : 'none';
+}
+
+function startSelectionMode(){
+  // show a small selection menu overlay via prompt (simple)
+  const choice = prompt("Choose a planet by name:\n1. W7-21\n2. X9-Zenith\n3. Orion-5\n\nType the name exactly (e.g. W7-21).");
+  if (!choice) return;
+  if (!planets[choice]) {
+    alert("Unknown planet name. Try exactly: W7-21, X9-Zenith, or Orion-5");
+    return;
+  }
+  selectedPlanet = planets[choice];
+  beginTravel();
+}
+
+function beginTravel(){
+  mode = "traveling";
+  t = 0;
+  statusEl.textContent = `Flight to ${selectedPlanet.name} — engaging drive`;
+  arrivalButtons.style.display = 'none';
+  // make stars more dense and faster
+  starCount = 320;
+  resetStars();
+  // longer travel: set timer to arrive after ~9 seconds (depends on frame timing)
+  travelStart = performance.now();
+  travelDuration = 9500; // milliseconds
+}
+
+/* ---------- info panel content functions ---------- */
+function showPlanetProps(){
+  infoPanel.style.display = 'block';
+  document.getElementById('infoTitle').innerText = `${selectedPlanet ? selectedPlanet.name : 'Planet'} — Planetary Properties`;
+  document.getElementById('infoContent').innerHTML = selectedPlanet ? `<p>${selectedPlanet.planetaryProps}</p>` : `<p>No planet chosen yet.</p>`;
+}
+function showOrbitalProps(){
+  infoPanel.style.display = 'block';
+  document.getElementById('infoTitle').innerText = `${selectedPlanet ? selectedPlanet.name : 'Planet'} — Orbital Properties`;
+  document.getElementById('infoContent').innerHTML = selectedPlanet ? `<p>${selectedPlanet.orbitalProps}</p>` : `<p>No planet chosen yet.</p>`;
+}
+function showStellarProps(){
+  infoPanel.style.display = 'block';
+  document.getElementById('infoTitle').innerText = `${selectedPlanet ? selectedPlanet.name : 'Planet'} — Stellar Properties`;
+  document.getElementById('infoContent').innerHTML = selectedPlanet ? `<p>${selectedPlanet.stellarProps}</p>` : `<p>No planet chosen yet.</p>`;
+}
+function showRadiationProps(){
+  infoPanel.style.display = 'block';
+  document.getElementById('infoTitle').innerText = `${selectedPlanet ? selectedPlanet.name : 'Planet'} — Radiation`;
+  document.getElementById('infoContent').innerHTML = selectedPlanet ? `<p>${selectedPlanet.radiation}</p>` : `<p>No planet chosen yet.</p>`;
+}
+
+/* ---------- animation loop ---------- */
+let lastFrame = performance.now();
+let travelStart = 0;
+let travelDuration = 9000; // default
+
+function animate(now){
+  const dt = now - lastFrame;
+  lastFrame = now;
+  t += dt;
+
+  if (mode === "idle") {
+    // gentle starfield slow
+    drawStarfield(0.12);
+    drawShip();
+  } else if (mode === "traveling") {
+    // faster starfield and ship
+    drawStarfield(1.2);
+    drawShip();
+    // decide when to arrive
+    if (!travelStart) travelStart = now;
+    const elapsed = now - travelStart;
+    // show progress in status
+    const pct = Math.min(1, elapsed / travelDuration);
+    statusEl.textContent = `Travelling to ${selectedPlanet.name} — ${Math.floor(pct*100)}%`;
+    if (elapsed >= travelDuration) {
+      // arrive
+      mode = "arrived";
+      travelStart = 0;
+      statusEl.textContent = `Arrived at ${selectedPlanet.name}`;
+      // show arrival controls
+      arrivalButtons.style.display = 'flex';
+      setTimeout(()=>{ arrivalButtons.style.display = 'flex';}, 200);
+    }
+  } else if (mode === "arrived") {
+    // smooth arrival scene (phase used if want transition)
+    drawArrivalScene(1);
+    // small ship landing indicator - don't draw ship body, maybe a small rover light
+    // keep status visible
+  } else {
+    // fallback
+    clear();
+  }
+
+  requestAnimationFrame(animate);
+}
+
+/* start idle loop */
+mode = "idle";
+requestAnimationFrame(animate);
+
+/* ---------- HUD drains (just cosmetic) ---------- */
+let health = 100;
+let hunger = 80;
+setInterval(()=>{
+  // small decay on hunger, affect health when hunger low
+  hunger = Math.max(0, hunger - 0.03);
+  if (hunger < 20) health = Math.max(0, health - 0.02);
+  document.getElementById('healthBar').style.width = health + '%';
+  document.getElementById('hungerBar').style.width = hunger + '%';
+  document.getElementById('healthValue').textContent = Math.round(health) + '%';
+  document.getElementById('hungerValue').textContent = Math.round(hunger) + '%';
+}, 150);
+
+/* initialize small UI state */
+infoPanel.style.display = 'none';
+arrivalButtons.style.display = 'none';
+</script>
+</body>
+</html>
